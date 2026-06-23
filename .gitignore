@@ -13,7 +13,7 @@ android/key.properties
 .svn/
 *.jks
 */key.properties
-key.properties
+android/key.properties
 # IntelliJ related
 *.iml
 *.ipr
