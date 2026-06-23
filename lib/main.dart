@@ -1,75 +1,80 @@
-import 'dart:math';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
-void main()=>runApp(XyloPhoneApp());
+import 'app/theme.dart';
+import 'screens/home_screen.dart';
+import 'services/ad_manager.dart';
+import 'services/ads_service.dart';
+import 'services/audio_service.dart';
+import 'services/purchase_service.dart';
+import 'services/settings_store.dart';
+import 'state/xylophone_controller.dart';
 
-class XyloPhoneApp extends StatefulWidget {
-  XyloPhoneApp({super.key});
-  static const List<MaterialColor> colors=[Colors.green,Colors.indigo,Colors.red,Colors.yellow,Colors.orange,Colors.purple,Colors.grey];
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations(
+    const [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown],
+  );
 
-  @override
-  State<XyloPhoneApp> createState() => _XyloPhoneAppState();
+  // Only the (fast) settings load blocks first paint. The controller pushes the
+  // saved octave & volume onto the audio service.
+  final store = await SettingsStore.create();
+  final audio = AudioService();
+  final controller = XylophoneController(audio, store);
+  final purchases = PurchaseService();
+  final adManager = AdManager(purchases);
+
+  // Show the UI immediately, then warm up the heavier services in the
+  // background (synthesising tones, AdMob, billing). The instrument renders at
+  // once; audio simply no-ops until it's ready, and ads/Pro update when ready.
+  // Each is guarded so a failure can never blank the screen.
+  runApp(XylophoneApp(
+    controller: controller,
+    purchases: purchases,
+    adManager: adManager,
+  ));
+
+  _warmUp('audio', audio.init);
+  _warmUp('ads', () async {
+    await AdsService.init();
+    adManager.start();
+  });
+  _warmUp('purchases', purchases.init);
 }
 
-class _XyloPhoneAppState extends State<XyloPhoneApp> {
-  final audioPlayer=AudioPlayer(playerId: Random().nextInt(1000).toString());
-  List<Uri>? audioPlayersUris;
+void _warmUp(String name, Future<void> Function() init) {
+  init().catchError((Object e, StackTrace s) {
+    debugPrint('Xylophone: $name init failed: $e');
+  });
+}
 
-  _playAudio(int index) async{
-    if(audioPlayersUris==null) return;
-    await audioPlayer.stop();
-    await audioPlayer.play(UrlSource((audioPlayersUris![index]).path));
-  }
+class XylophoneApp extends StatelessWidget {
+  final XylophoneController controller;
+  final PurchaseService purchases;
+  final AdManager adManager;
 
-  @override
-  void initState(){
-    super.initState();
-    for(int i=0;i<7;i++){
-      audioPlayer.audioCache.loadAll(List.generate(7, (index) => "note${index+1}.wav")).then((asuri) => audioPlayersUris=asuri);
-    }
-  }
+  const XylophoneApp({
+    super.key,
+    required this.controller,
+    required this.purchases,
+    required this.adManager,
+  });
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        resizeToAvoidBottomInset: false,
-        extendBody: true,
-        appBar: AppBar(
-          title: const Text("XyloPhone"),
-          centerTitle: true,
-          backgroundColor: Colors.red,
-        ),
-        body: Column(
-          mainAxisSize: MainAxisSize.max,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: List.generate(7, (i) => Expanded(
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: XyloPhoneApp.colors[i],
-                side: BorderSide(color: XyloPhoneApp.colors[i][700]!,width: 10.0),
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                overlayColor: XyloPhoneApp.colors[i][700],
-              ),
-              child: audioPlayersUris==null ? CircularProgressIndicator(color: XyloPhoneApp.colors[i][900]?.withOpacity(0.5)) : Icon(Icons.music_note,color:XyloPhoneApp.colors[i][900],size: 50,),
-              onPressed: ()=>_playAudio(i),
-            ),
-          ))
-        )
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: controller),
+        ChangeNotifierProvider.value(value: purchases),
+        Provider<AdManager>.value(value: adManager),
+      ],
+      child: MaterialApp(
+        title: 'Xylophone',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.themeData(),
+        home: const HomeScreen(),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    audioPlayer.dispose();
-    super.dispose();
   }
 }
