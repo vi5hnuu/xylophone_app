@@ -1,6 +1,5 @@
 plugins {
     id "com.android.application"
-    id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
 }
 
@@ -30,16 +29,16 @@ if (keystorePropertiesFile.exists()) {
 }
 android {
     namespace "com.vi5hnu.xylophone"
-    compileSdkVersion 34
+    compileSdk 36
     ndkVersion flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility 11
-        targetCompatibility 11
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = '11'
+        jvmTarget = '17'
     }
 
     sourceSets {
@@ -51,29 +50,37 @@ android {
         applicationId "com.vi5hnu.xylophone"
         // You can update the following values to match your application needs.
         // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
-        minSdkVersion 29
-        targetSdkVersion 34
+        minSdkVersion 24
+        targetSdkVersion 35
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+
+        // flutter_soloud's native code fails to compile for x86_64, and x86/
+        // x86_64 are emulator-only ABIs. Restrict to the arm ABIs that all real
+        // phones use so the build succeeds. (Drop this to re-add emulator support
+        // once the plugin builds for x86_64.)
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
     }
 
     signingConfigs {
+        // Release signing is configured only when a key.properties + keystore
+        // are present. Otherwise builds fall back to the default debug keystore
+        // (so `flutter build` works on a fresh checkout). The `debug` config is
+        // AGP's built-in default and is left untouched.
         release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-            storePassword keystoreProperties['storePassword']
-        }
-        debug {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-            storePassword keystoreProperties['storePassword']
+            if (keystorePropertiesFile.exists()) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+                storePassword keystoreProperties['storePassword']
+            }
         }
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
         }
         debug {
             signingConfig signingConfigs.debug

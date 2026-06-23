@@ -1,5 +1,5 @@
 name: xylophone
-description: a project that simulates basic piano kind of sounds.
+description: A colourful tap-to-play xylophone for kids — three octaves, real mallet notes, and a simple tune recorder.
 
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -35,7 +35,12 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.2
   audioplayers: ^6.0.0
-
+  google_mobile_ads: ^9.0.0
+  in_app_purchase: ^3.3.0
+  shared_preferences: ^2.5.5
+  provider: ^6.1.5+1
+  url_launcher: ^6.3.2
+  flutter_soloud: ^4.0.11
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -45,7 +50,20 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# Launcher icon generation (run: dart run flutter_launcher_icons).
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  min_sdk_android: 24
+  image_path: "images/app_icon_512.png"
+  # Android 8+ uses adaptive icons; regenerate the foreground from the new art
+  # (on a soft lavender that matches the icon) so the launcher shows it.
+  adaptive_icon_background: "#ECE5FB"
+  adaptive_icon_foreground: "images/app_icon_512.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -58,10 +76,19 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  assets:
-    - assets/
-  #   - images/a_dot_ham.jpeg
+  # Fonts are bundled (not fetched at runtime) so the app works fully offline —
+  # important for a kids app. Both are variable fonts; Flutter maps fontWeight
+  # to the weight axis.
+  fonts:
+    - family: Fredoka
+      fonts:
+        - asset: fonts/Fredoka.ttf
+    - family: Nunito
+      fonts:
+        - asset: fonts/Nunito.ttf
+
+  # Note audio is synthesised at runtime (see lib/services/tone_synth.dart),
+  # so no audio assets need to be bundled.
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware.
