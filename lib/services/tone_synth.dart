@@ -3,25 +3,22 @@ import 'dart:typed_data';
 
 /// Synthesises the xylophone mallet tone in pure Dart, mirroring the Web-Audio
 /// recipe in the design source: a sine fundamental plus a bright inharmonic
-/// partial at ~4× with fast exponential decays. Output is a 16-bit PCM mono WAV
-/// so it can be fed straight to audioplayers as a [BytesSource].
+/// partial at ~4× with fast exponential decays. Output is a 16-bit PCM mono WAV.
 ///
-/// We synthesise each note at its true pitch (a C-major scale), so the notes are
-/// always in tune; octaves are then handled by playback rate (×0.5 / ×1 / ×2),
-/// exactly like `freq * 2^(octave-2)` in the design.
+/// Each note is synthesised at its true pitch (a C-major scale), so notes are
+/// always in tune; octaves shift the frequency (`freq * 2^(octave-2)`).
 class ToneSynth {
   static const int sampleRate = 44100;
+  static const double _noteDuration = 1.8; // seconds per note
 
   /// C-major scale: C4 D4 E4 F4 G4 A4 B4 (Hz) — identical to the design.
   static const List<double> baseFreqs = [
     261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88,
   ];
 
-  /// Build a WAV for [freq]. Peak amplitude is kept below 1.0 so the runtime
-  /// volume can be controlled by the player (not baked into the sample).
-  static Uint8List wavForFreq(double freq) {
-    const double duration = 1.8; // seconds
-    final int n = (duration * sampleRate).round();
+  /// Raw mono samples (−1..1) for a single mallet strike at [freq].
+  static Float64List samplesForFreq(double freq) {
+    final int n = (_noteDuration * sampleRate).round();
     final samples = Float64List(n);
 
     const double a1 = 0.70; // fundamental peak
@@ -32,7 +29,8 @@ class ToneSynth {
     for (int i = 0; i < n; i++) {
       final double t = i / sampleRate;
 
-      final double env1 = _expEnv(t, peak: a1, attack: 0.004, decay: 1.7, floor: floor);
+      final double env1 =
+          _expEnv(t, peak: a1, attack: 0.004, decay: 1.7, floor: floor);
       final double s1 = sin(2 * pi * freq * t) * env1;
 
       double s2 = 0;
@@ -44,8 +42,48 @@ class ToneSynth {
 
       samples[i] = (s1 + s2).clamp(-1.0, 1.0);
     }
+    return samples;
+  }
 
-    return _encodeWavMono16(samples);
+  /// Build a single-note WAV for [freq] (used to feed the playback engine).
+  static Uint8List wavForFreq(double freq) =>
+      _encodeWavMono16(samplesForFreq(freq));
+
+  /// Render a recorded tune — a list of (frequency, start-time) hits — into one
+  /// mixed WAV, so it can be saved as an audio file. Overlapping notes are summed
+  /// and the whole mix is normalised to avoid clipping.
+  static Uint8List renderTuneWav(List<({double freq, int atMs})> notes) {
+    if (notes.isEmpty) return _encodeWavMono16(Float64List(0));
+
+    final int tail = (_noteDuration * sampleRate).round();
+    int lastStart = 0;
+    for (final note in notes) {
+      final s = (note.atMs / 1000 * sampleRate).round();
+      if (s > lastStart) lastStart = s;
+    }
+    final mix = Float64List(lastStart + tail);
+
+    for (final note in notes) {
+      final int start = (note.atMs / 1000 * sampleRate).round();
+      final tone = samplesForFreq(note.freq);
+      for (int i = 0; i < tone.length; i++) {
+        mix[start + i] += tone[i];
+      }
+    }
+
+    // Normalise if summing pushed the peak above 1.0.
+    double peak = 0;
+    for (final v in mix) {
+      final a = v.abs();
+      if (a > peak) peak = a;
+    }
+    if (peak > 1.0) {
+      final scale = 0.97 / peak;
+      for (int i = 0; i < mix.length; i++) {
+        mix[i] *= scale;
+      }
+    }
+    return _encodeWavMono16(mix);
   }
 
   /// Attack from `floor`→`peak`, then exponential decay `peak`→`floor`.

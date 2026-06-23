@@ -35,6 +35,8 @@ key.properties
 .pub-cache/
 .pub/
 /build/
+android/build/
+android/.cxx/
 
 # Web related
 lib/generated_plugin_registrant.dart
