@@ -119,18 +119,12 @@ class _SaveButton extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
-        if (saved) return;
-        if (isPro) {
-          controller.saveRecording();
-          ScaffoldMessenger.of(context)
-            ..clearSnackBars()
-            ..showSnackBar(const SnackBar(
-              content: Text('Tune saved 🎵'),
-              duration: Duration(seconds: 2),
-              behavior: SnackBarBehavior.floating,
-            ));
-        } else {
+        if (!isPro) {
           showProSheet(context);
+        } else if (saved) {
+          controller.shareTune(); // already saved → share the audio file
+        } else {
+          _saveAndExport(context);
         }
       },
       child: SizedBox(
@@ -140,9 +134,10 @@ class _SaveButton extends StatelessWidget {
           alignment: Alignment.center,
           children: [
             Icon(
-              saved ? Icons.check_circle_rounded : Icons.bookmark_add_rounded,
+              // Becomes a Share button once the tune has been saved.
+              saved ? Icons.ios_share_rounded : Icons.bookmark_add_rounded,
               size: 22,
-              color: saved ? const Color(0xFF6BB85A) : AppTheme.playBtnFg,
+              color: AppTheme.playBtnFg,
             ),
             if (!isPro && !saved)
               const Positioned(
@@ -154,6 +149,41 @@ class _SaveButton extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _saveAndExport(BuildContext context) async {
+    controller.saveRecording();
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(const SnackBar(
+        content: Text('Saving tune…'),
+        duration: Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ));
+    try {
+      final result = await controller.exportRecordingToFile();
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          content: Text(result == null
+              ? 'Tune saved 🎵'
+              : 'Saved to ${result.displayLocation} 🎵'),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: 'SHARE',
+            onPressed: controller.shareTune,
+          ),
+        ));
+    } catch (_) {
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(const SnackBar(
+          content: Text('Couldn’t save the audio file'),
+          behavior: SnackBarBehavior.floating,
+        ));
+    }
   }
 }
 

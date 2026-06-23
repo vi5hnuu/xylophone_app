@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/note.dart';
 import '../models/recording.dart';
 import '../services/audio_service.dart';
 import '../services/settings_store.dart';
+import '../services/tone_synth.dart';
+import '../services/tune_exporter.dart';
 
 enum Transport { idle, recording, playing }
 
@@ -157,6 +160,38 @@ class XylophoneController extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? _lastSavedPath;
+
+  /// Render the current tune to a `.wav` audio file in local storage (Pro
+  /// feature). Returns the save result, or null if there's nothing to export.
+  Future<TuneSaveResult?> exportRecordingToFile() async {
+    final rec = _recording;
+    if (rec == null || rec.isEmpty) return null;
+    final notes = rec.hits
+        .map((h) => (
+              freq: ToneSynth.baseFreqs[h.noteIndex] * h.octave.rate,
+              atMs: h.atMs,
+            ))
+        .toList(growable: false);
+    final wav = ToneSynth.renderTuneWav(notes);
+    final result = await TuneExporter.save(wav);
+    _lastSavedPath = result.filePath;
+    return result;
+  }
+
+  /// Share the tune as an audio file via the system share sheet (exports first
+  /// if it hasn't been rendered to a file yet this session).
+  Future<void> shareTune() async {
+    if (_lastSavedPath == null) {
+      await exportRecordingToFile();
+    }
+    final path = _lastSavedPath;
+    if (path == null) return;
+    await SharePlus.instance.share(
+      ShareParams(files: [XFile(path)], text: 'My Xylophone tune 🎵'),
+    );
+  }
+
   void playRecording() {
     final rec = _recording;
     if (rec == null || rec.isEmpty || _transport == Transport.playing) return;
@@ -193,6 +228,7 @@ class XylophoneController extends ChangeNotifier {
     stopPlayback();
     _recording = null;
     _saved = false;
+    _lastSavedPath = null;
     _store.recording = null;
     notifyListeners();
   }
