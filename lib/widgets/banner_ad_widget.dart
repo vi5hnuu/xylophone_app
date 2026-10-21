@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:provider/provider.dart';
@@ -8,7 +11,9 @@ import '../services/ads_service.dart';
 
 /// A compact 320×50 banner. A fixed standard size (rather than the *large*
 /// adaptive size) keeps the ad tight to its creative, with no empty padding
-/// above/below it. Renders nothing until loaded, and collapses on failure. Only
+/// above/below it. Renders nothing until loaded, collapses on failure and
+/// retries with backoff (30s → 10min), so a network blip doesn't leave the
+/// banner gone for the rest of the session. Only
 /// mount this when ads are on. A small "AD" label keeps it clearly marked as
 /// an ad (Families policy).
 class BannerAdWidget extends StatefulWidget {
@@ -21,22 +26,35 @@ class BannerAdWidget extends StatefulWidget {
 class _BannerAdWidgetState extends State<BannerAdWidget> {
   BannerAd? _ad;
   bool _loaded = false;
+  int _failures = 0;
+  Timer? _retry;
 
   @override
   void initState() {
     super.initState();
+    _load();
+  }
+
+  void _load() {
     final ad = BannerAd(
       adUnitId: AdsService.bannerAdUnitId,
       size: AdSize.banner, // 320 × 50
       request: AdsService.request(),
       listener: BannerAdListener(
         onAdLoaded: (_) {
+          _failures = 0;
           if (mounted) setState(() => _loaded = true);
         },
         onAdFailedToLoad: (ad, _) {
           ad.dispose();
           _ad = null;
-          if (mounted) setState(() => _loaded = false);
+          if (!mounted) return;
+          setState(() => _loaded = false);
+          _failures++;
+          final delay = min(600, 30 * pow(2, _failures - 1).toInt());
+          _retry = Timer(Duration(seconds: delay), () {
+            if (mounted) _load();
+          });
         },
         // A click opens the advertiser outside the app; coming back from it
         // must not trigger an app-open ad.
@@ -51,6 +69,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
 
   @override
   void dispose() {
+    _retry?.cancel();
     _ad?.dispose();
     super.dispose();
   }
