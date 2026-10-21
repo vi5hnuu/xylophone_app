@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app/theme.dart';
+import '../services/ad_free_pass.dart';
+import '../services/ad_manager.dart';
 import '../services/purchase_service.dart';
+import '../widgets/parental_gate.dart';
 import 'pro_sheet.dart';
 
 const String _privacyUrl =
     'https://legal.laxmi.solutions/xylophone/privacy-policy';
 const String _termsUrl =
     'https://legal.laxmi.solutions/xylophone/terms-of-service';
+const String _storeUrl =
+    'https://play.google.com/store/apps/details?id=com.vi5hnu.xylophone';
+const String _supportEmail = 'laxmi.solutions.2025@gmail.com';
 
 Future<void> showSettingsSheet(BuildContext context) {
+  context.read<PurchaseService>().clearNotice();
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
@@ -25,7 +33,9 @@ class SettingsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isPro = context.watch<PurchaseService>().isPro;
+    final purchases = context.watch<PurchaseService>();
+    final isPro = purchases.isPro;
+    final pass = context.watch<AdFreePass>();
 
     return Container(
       decoration: const BoxDecoration(
@@ -35,7 +45,8 @@ class SettingsSheet extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
       child: SafeArea(
         top: false,
-        child: Column(
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -60,23 +71,74 @@ class SettingsSheet extends StatelessWidget {
                         color: Color(0xFF4F9B3E),
                         fontWeight: FontWeight.w700)),
               ),
+            if (!isPro && pass.active)
+              _Tile(
+                icon: Icons.timer_outlined,
+                label: 'Ad-free time left',
+                trailing: Text(formatRemaining(pass.remaining),
+                    style: const TextStyle(
+                        color: Color(0xFF4F9B3E),
+                        fontWeight: FontWeight.w700)),
+              ),
+            if (!isPro)
+              _Tile(
+                icon: Icons.restore_rounded,
+                label: 'Restore purchase',
+                trailing: purchases.restoring
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(
+                        switch (purchases.notice) {
+                          PurchaseNotice.nothingToRestore => 'None found',
+                          PurchaseNotice.pending => 'Payment pending',
+                          PurchaseNotice.storeUnavailable => 'Offline',
+                          _ => '',
+                        },
+                        style: const TextStyle(color: AppTheme.inkSoft)),
+                onTap: purchases.restore,
+              ),
+            const _SectionLabel('Help'),
+            _Tile(
+              icon: Icons.star_outline_rounded,
+              label: 'Rate Xylophone',
+              onTap: () => _openGated(context, Uri.parse(_storeUrl)),
+            ),
+            _Tile(
+              icon: Icons.mail_outline_rounded,
+              label: 'Contact support',
+              onTap: () => _openGated(
+                context,
+                Uri(
+                  scheme: 'mailto',
+                  path: _supportEmail,
+                  query: 'subject=Xylophone%20support',
+                ),
+              ),
+            ),
             const _SectionLabel('Legal'),
             _Tile(
               icon: Icons.privacy_tip_outlined,
               label: 'Privacy Policy',
-              onTap: () => _open(_privacyUrl),
+              onTap: () => _openGated(context, Uri.parse(_privacyUrl)),
             ),
             _Tile(
               icon: Icons.description_outlined,
               label: 'Terms of Service',
-              onTap: () => _open(_termsUrl),
+              onTap: () => _openGated(context, Uri.parse(_termsUrl)),
             ),
             const _SectionLabel('About'),
-            const _Tile(
+            _Tile(
               icon: Icons.info_outline_rounded,
               label: 'Version',
-              trailing: Text('1.0.0',
-                  style: TextStyle(color: AppTheme.inkSoft)),
+              trailing: FutureBuilder<PackageInfo>(
+                future: PackageInfo.fromPlatform(),
+                builder: (context, snap) => Text(
+                  snap.data?.version ?? '',
+                  style: const TextStyle(color: AppTheme.inkSoft),
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             const Center(
@@ -84,13 +146,20 @@ class SettingsSheet extends StatelessWidget {
                   style: TextStyle(color: AppTheme.inkSoft, fontSize: 12)),
             ),
           ],
+          ),
         ),
       ),
     );
   }
 
-  Future<void> _open(String url) =>
-      launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  /// Anything that leaves the app sits behind the grown-ups check, and
+  /// returning from it must not trigger an app-open ad.
+  Future<void> _openGated(BuildContext context, Uri uri) async {
+    final ads = context.read<AdManager>();
+    if (!await showParentalGate(context)) return;
+    ads.suppressAppOpenOnce();
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
 }
 
 class _ProBanner extends StatelessWidget {
@@ -117,12 +186,12 @@ class _ProBanner extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Remove ads with Pro',
+                    Text('Go Pro: all songs, no ads',
                         style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 15.5)),
-                    Text('A one-time purchase',
+                    Text('A one-time purchase · no subscription',
                         style: TextStyle(color: Colors.white70, fontSize: 12)),
                   ],
                 ),
@@ -135,7 +204,7 @@ class _ProBanner extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Text(
-                  purchases.storeAvailable ? purchases.priceLabel : 'Pro',
+                  purchases.priceLabel ?? 'Pro',
                   style: const TextStyle(
                       color: AppTheme.accent, fontWeight: FontWeight.w800),
                 ),

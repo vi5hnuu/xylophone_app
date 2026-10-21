@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../app/theme.dart';
 import '../models/note.dart';
+import '../services/ad_manager.dart';
 import '../services/purchase_service.dart';
 import '../screens/pro_sheet.dart';
 import '../state/xylophone_controller.dart';
@@ -39,7 +40,7 @@ class RecordBar extends StatelessWidget {
           if (c.hasRecording && !c.isRecording) _SaveButton(controller: c),
           if (c.hasRecording)
             GestureDetector(
-              onTap: c.clearRecording,
+              onTap: () => _clear(context, c),
               behavior: HitTestBehavior.opaque,
               child: const SizedBox(
                 width: 34,
@@ -52,6 +53,25 @@ class RecordBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Clears the tune but offers a few seconds to undo — easy to hit by accident.
+void _clear(BuildContext context, XylophoneController c) {
+  c.clearRecording();
+  ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(SnackBar(
+      content: const Text('Tune cleared'),
+      duration: const Duration(seconds: 4),
+      behavior: SnackBarBehavior.floating,
+      action: SnackBarAction(label: 'UNDO', onPressed: c.undoClear),
+    ));
+}
+
+/// Opens the system share sheet without an app-open ad on the way back.
+void _share(BuildContext context, XylophoneController c) {
+  context.read<AdManager>().suppressAppOpenOnce();
+  c.shareTune();
 }
 
 class _Strip extends StatelessWidget {
@@ -120,9 +140,9 @@ class _SaveButton extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: () {
         if (!isPro) {
-          showProSheet(context);
+          showProSheet(context, reason: 'Saving & sharing tunes is a Pro feature');
         } else if (saved) {
-          controller.shareTune(); // already saved → share the audio file
+          _share(context, controller); // already saved → share the audio file
         } else {
           _saveAndExport(context);
         }
@@ -153,6 +173,12 @@ class _SaveButton extends StatelessWidget {
 
   Future<void> _saveAndExport(BuildContext context) async {
     controller.saveRecording();
+    final ads = context.read<AdManager>();
+    void share() {
+      ads.suppressAppOpenOnce();
+      controller.shareTune();
+    }
+
     final messenger = ScaffoldMessenger.of(context);
     messenger
       ..clearSnackBars()
@@ -173,7 +199,7 @@ class _SaveButton extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
           action: SnackBarAction(
             label: 'SHARE',
-            onPressed: controller.shareTune,
+            onPressed: share,
           ),
         ));
     } catch (_) {

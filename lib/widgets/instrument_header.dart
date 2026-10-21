@@ -4,10 +4,16 @@ import 'package:provider/provider.dart';
 import '../app/theme.dart';
 import '../state/xylophone_controller.dart';
 
-/// Header: app glyph + title on the left; mute + settings buttons on the right.
+/// Header: app glyph + title on the left; songs, mute and settings buttons on
+/// the right.
 class InstrumentHeader extends StatelessWidget {
+  final VoidCallback onSongs;
   final VoidCallback onSettings;
-  const InstrumentHeader({super.key, required this.onSettings});
+  const InstrumentHeader({
+    super.key,
+    required this.onSongs,
+    required this.onSettings,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -26,22 +32,38 @@ class InstrumentHeader extends StatelessWidget {
           child: const _GlyphBars(),
         ),
         const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Xylophone', style: AppTheme.title()),
-            const SizedBox(height: 4),
-            Text('TAP · PLAY · RECORD', style: AppTheme.nunitoLabel()),
-          ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Xylophone', style: AppTheme.title()),
+              const SizedBox(height: 4),
+              Text('TAP · PLAY · RECORD',
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: AppTheme.nunitoLabel()),
+            ],
+          ),
         ),
-        const Spacer(),
         _HeaderButton(
+          icon: Icons.library_music_rounded,
+          tooltip: 'Songs',
+          onTap: onSongs,
+        ),
+        const SizedBox(width: 9),
+        _HeaderButton(
+          tooltip: muted ? 'Unmute' : 'Mute',
           icon: muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
           onTap: context.read<XylophoneController>().toggleMute,
         ),
         const SizedBox(width: 9),
-        _HeaderButton(icon: Icons.settings_rounded, onTap: onSettings),
+        _HeaderButton(
+          icon: Icons.settings_rounded,
+          tooltip: 'Settings',
+          onTap: onSettings,
+        ),
       ],
     );
   }
@@ -79,29 +101,37 @@ class _GlyphBars extends StatelessWidget {
 
 class _HeaderButton extends StatelessWidget {
   final IconData icon;
+  final String tooltip;
   final VoidCallback onTap;
-  const _HeaderButton({required this.icon, required this.onTap});
+  const _HeaderButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      elevation: 0,
-      shadowColor: Colors.transparent,
-      child: Ink(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: AppTheme.headerBtnShadow(),
-        ),
+    // The shadow lives on a box *outside* the Material: Material clips what
+    // it paints (including Ink decorations) to its rounded shape, which used to
+    // crop the shadow at the button's edges.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: AppTheme.headerBtnShadow(),
+      ),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: onTap,
-          child: SizedBox(
-            width: 42,
-            height: 42,
-            child: Icon(icon, size: 20, color: AppTheme.pillIcon),
+          child: Tooltip(
+            message: tooltip,
+            child: SizedBox(
+              width: 42,
+              height: 42,
+              child: Icon(icon, size: 20, color: AppTheme.pillIcon),
+            ),
           ),
         ),
       ),
