@@ -12,6 +12,9 @@ class XylophoneKeys extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.read<XylophoneController>();
+    // In song mode, the key to play next glows and bobs.
+    final expected =
+        context.select<XylophoneController, int?>((c) => c.expectedKey);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       decoration: BoxDecoration(
@@ -29,6 +32,7 @@ class XylophoneKeys extends StatelessWidget {
                 index: i,
                 onStrike: () => c.strike(i),
                 struck: c.struck,
+                hinted: expected == i,
               ),
             ),
             if (i != kNotes.length - 1) const SizedBox(width: 9),
@@ -44,12 +48,14 @@ class _Key extends StatefulWidget {
   final int index;
   final VoidCallback onStrike;
   final ValueNotifier<({int index, int token})?> struck;
+  final bool hinted;
 
   const _Key({
     required this.note,
     required this.index,
     required this.onStrike,
     required this.struck,
+    required this.hinted,
   });
 
   @override
@@ -66,11 +72,28 @@ class _KeyState extends State<_Key> with TickerProviderStateMixin {
     vsync: this,
     duration: const Duration(milliseconds: 450),
   );
+  late final AnimationController _hint = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 650),
+  );
 
   @override
   void initState() {
     super.initState();
     widget.struck.addListener(_onStruck);
+    if (widget.hinted) _hint.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_Key old) {
+    super.didUpdateWidget(old);
+    if (widget.hinted && !_hint.isAnimating) {
+      _hint.repeat(reverse: true);
+    } else if (!widget.hinted && _hint.isAnimating) {
+      _hint
+        ..stop()
+        ..value = 0;
+    }
   }
 
   void _onStruck() {
@@ -92,6 +115,7 @@ class _KeyState extends State<_Key> with TickerProviderStateMixin {
     widget.struck.removeListener(_onStruck);
     _press.dispose();
     _glow.dispose();
+    _hint.dispose();
     super.dispose();
   }
 
@@ -106,11 +130,40 @@ class _KeyState extends State<_Key> with TickerProviderStateMixin {
         onTapUp: (_) => _up(),
         onTapCancel: _up,
         child: AnimatedBuilder(
-          animation: _press,
-          builder: (context, child) => Transform.translate(
-            offset: Offset(0, 5 * _press.value),
-            child: child,
-          ),
+          animation: Listenable.merge([_press, _hint]),
+          builder: (context, child) {
+            final h = widget.hinted ? _hint.value : 0.0;
+            return Transform.translate(
+              offset: Offset(0, 5 * _press.value - 6 * h),
+              child: widget.hinted
+                  ? DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: [
+                          BoxShadow(
+                            color: widget.note.bottom
+                                .withValues(alpha: 0.35 + 0.45 * h),
+                            blurRadius: 10 + 12 * h,
+                            spreadRadius: 1 + 3 * h,
+                          ),
+                        ],
+                      ),
+                      child: DecoratedBox(
+                        position: DecorationPosition.foreground,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color:
+                                Colors.white.withValues(alpha: 0.6 + 0.4 * h),
+                            width: 3,
+                          ),
+                        ),
+                        child: child,
+                      ),
+                    )
+                  : child,
+            );
+          },
           child: _bar(),
         ),
       ),

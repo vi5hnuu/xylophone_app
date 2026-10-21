@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/theme.dart';
 import 'screens/home_screen.dart';
+import 'services/ad_free_pass.dart';
 import 'services/ad_manager.dart';
 import 'services/ads_service.dart';
 import 'services/audio_service.dart';
@@ -19,11 +21,13 @@ Future<void> main() async {
 
   // Only the (fast) settings load blocks first paint. The controller pushes the
   // saved octave & volume onto the audio service.
-  final store = await SettingsStore.create();
+  final prefs = await SharedPreferences.getInstance();
+  final store = SettingsStore(prefs);
   final audio = AudioService();
   final controller = XylophoneController(audio, store);
-  final purchases = PurchaseService();
-  final adManager = AdManager(purchases);
+  final purchases = PurchaseService(prefs);
+  final adFreePass = AdFreePass(prefs);
+  final adManager = AdManager(purchases, adFreePass);
 
   // Show the UI immediately, then warm up the heavier services in the
   // background (synthesising tones, AdMob, billing). The instrument renders at
@@ -32,6 +36,7 @@ Future<void> main() async {
   runApp(XylophoneApp(
     controller: controller,
     purchases: purchases,
+    adFreePass: adFreePass,
     adManager: adManager,
   ));
 
@@ -52,12 +57,14 @@ void _warmUp(String name, Future<void> Function() init) {
 class XylophoneApp extends StatelessWidget {
   final XylophoneController controller;
   final PurchaseService purchases;
+  final AdFreePass adFreePass;
   final AdManager adManager;
 
   const XylophoneApp({
     super.key,
     required this.controller,
     required this.purchases,
+    required this.adFreePass,
     required this.adManager,
   });
 
@@ -67,7 +74,8 @@ class XylophoneApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider.value(value: controller),
         ChangeNotifierProvider.value(value: purchases),
-        Provider<AdManager>.value(value: adManager),
+        ChangeNotifierProvider.value(value: adFreePass),
+        ChangeNotifierProvider.value(value: adManager),
       ],
       child: MaterialApp(
         title: 'Xylophone',

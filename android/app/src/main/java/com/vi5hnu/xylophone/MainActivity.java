@@ -6,23 +6,32 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.util.Base64;
 
 import androidx.annotation.NonNull;
 
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.spec.X509EncodedKeySpec;
 
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
 import io.flutter.plugin.common.MethodChannel;
 
 /**
- * Adds a small platform channel that saves an audio file into the shared
- * Music collection using Android's official MediaStore API (scoped storage,
- * no permission needed on Android 10+). This avoids depending on any
- * third-party storage plugin.
+ * Adds two small platform channels:
+ *  - storage: saves an audio file into the shared Music collection using
+ *    Android's official MediaStore API (scoped storage, no permission needed
+ *    on Android 10+), avoiding any third-party storage plugin.
+ *  - billing: verifies a Google Play purchase signature against the app's
+ *    Play licence key with the platform's own crypto (no extra library).
  */
 public class MainActivity extends FlutterActivity {
     private static final String CHANNEL = "xylophone/storage";
+    private static final String BILLING_CHANNEL = "xylophone/billing";
 
     @Override
     public void configureFlutterEngine(@NonNull FlutterEngine flutterEngine) {
@@ -37,6 +46,37 @@ public class MainActivity extends FlutterActivity {
                         result.notImplemented();
                     }
                 });
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), BILLING_CHANNEL)
+                .setMethodCallHandler((call, result) -> {
+                    if ("verifyPurchase".equals(call.method)) {
+                        String publicKey = call.argument("publicKey");
+                        String signedData = call.argument("signedData");
+                        String signature = call.argument("signature");
+                        result.success(verifyPurchase(publicKey, signedData, signature));
+                    } else {
+                        result.notImplemented();
+                    }
+                });
+    }
+
+    /**
+     * Checks that [signedData] (the purchase's original JSON) was signed by
+     * Google Play with the key matching [publicKey] (the Base64 RSA licence key
+     * from Play Console). Rejects forged purchases from patched billing apps.
+     */
+    private boolean verifyPurchase(String publicKey, String signedData, String signature) {
+        if (publicKey == null || signedData == null || signature == null) return false;
+        try {
+            byte[] keyBytes = Base64.decode(publicKey, Base64.DEFAULT);
+            PublicKey key = KeyFactory.getInstance("RSA")
+                    .generatePublic(new X509EncodedKeySpec(keyBytes));
+            Signature verifier = Signature.getInstance("SHA1withRSA");
+            verifier.initVerify(key);
+            verifier.update(signedData.getBytes(StandardCharsets.UTF_8));
+            return verifier.verify(Base64.decode(signature, Base64.DEFAULT));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**

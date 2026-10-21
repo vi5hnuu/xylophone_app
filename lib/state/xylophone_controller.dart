@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../models/note.dart';
 import '../models/recording.dart';
+import '../models/song.dart';
 import '../services/audio_service.dart';
 import '../services/settings_store.dart';
 import '../services/tone_synth.dart';
@@ -14,8 +15,8 @@ import '../services/tune_exporter.dart';
 enum Transport { idle, recording, playing }
 
 /// Owns all interactive state for the instrument: the active octave & volume,
-/// the record/play transport, and the captured tune. Widgets listen to this and
-/// stay dumb.
+/// the record/play transport, the captured tune, and the song being learnt.
+/// Widgets listen to this and stay dumb.
 class XylophoneController extends ChangeNotifier {
   final AudioService _audio;
   final SettingsStore _store;
@@ -45,6 +46,14 @@ class XylophoneController extends ChangeNotifier {
   final ValueNotifier<({int index, int token})?> struck = ValueNotifier(null);
   int _token = 0;
 
+  Song? _song;
+  int _songStep = 0;
+  final StreamController<Song> _songDone = StreamController.broadcast();
+
+  // The last cleared tune, kept briefly so "Undo" can bring it back.
+  Recording? _cleared;
+  bool _clearedWasSaved = false;
+
   Octave get octave => _octave;
   double get volume => _volume;
   bool get muted => _audio.muted;
@@ -55,6 +64,24 @@ class XylophoneController extends ChangeNotifier {
 
   /// Whether the current tune has been persisted (a Pro feature).
   bool get isSaved => _saved;
+
+  /// The song being learnt, if any.
+  Song? get activeSong => _song;
+
+  /// How many notes of [activeSong] have been played correctly so far.
+  int get songStep => _songStep;
+
+  /// The key the child should strike next (glows on the keyboard).
+  int? get expectedKey {
+    final song = _song;
+    if (song == null || isPlaying || _songStep >= song.notes.length) {
+      return null;
+    }
+    return song.notes[_songStep].noteIndex;
+  }
+
+  /// Fires each time the child finishes playing [activeSong].
+  Stream<Song> get songCompleted => _songDone.stream;
 
   /// Note indices of the recorded tune, in order (used for the dots preview).
   List<int> get recordedNoteIndices =>
@@ -75,6 +102,19 @@ class XylophoneController extends ChangeNotifier {
         atMs: _watch.elapsedMilliseconds,
       ));
     }
+    _advanceSong(index);
+  }
+
+  void _advanceSong(int index) {
+    final song = _song;
+    if (song == null || index != expectedKey) return;
+    _songStep++;
+    if (_songStep >= song.notes.length) {
+      _songStep = 0; // ready to play again
+      HapticFeedback.heavyImpact();
+      _songDone.add(song);
+    }
+    notifyListeners();
   }
 
   void _pulse(int index) {
@@ -110,6 +150,48 @@ class XylophoneController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Songs ────────────────────────────────────────────────────────────────
+
+  void startSong(Song song) {
+    stopPlayback();
+    _song = song;
+    _songStep = 0;
+    notifyListeners();
+  }
+
+  void restartSong() {
+    if (_song == null) return;
+    _songStep = 0;
+    notifyListeners();
+  }
+
+  void exitSong() {
+    if (_song == null) return;
+    if (isPlaying) stopPlayback();
+    _song = null;
+    _songStep = 0;
+    notifyListeners();
+  }
+
+  /// Plays [activeSong] once as a demonstration, flashing each key.
+  void playSongDemo() {
+    final song = _song;
+    if (song == null || _transport != Transport.idle) return;
+    _transport = Transport.playing;
+    notifyListeners();
+
+    const beatMs = 430;
+    var at = 0;
+    for (final note in song.notes) {
+      _playbackTimers.add(Timer(Duration(milliseconds: at), () {
+        _audio.play(note.noteIndex);
+        _pulse(note.noteIndex);
+      }));
+      at += (note.beats * beatMs).round();
+    }
+    _playbackTimers.add(Timer(Duration(milliseconds: at + 300), stopPlayback));
+  }
+
   // ── Record / play transport ──────────────────────────────────────────────────
 
   void toggleRecord() {
@@ -141,6 +223,7 @@ class XylophoneController extends ChangeNotifier {
     _watch.stop();
     _transport = Transport.idle;
     _recording = _captured.isEmpty ? null : Recording(List.of(_captured));
+    _lastSavedPath = null; // any exported file belongs to the previous tune
     // A fresh recording is held in memory only; persisting it ("Save") is a Pro
     // feature handled by [saveRecording]. Replacing the previous tune drops its
     // saved copy so a free user can't keep an old saved tune around.
@@ -226,6 +309,8 @@ class XylophoneController extends ChangeNotifier {
 
   void clearRecording() {
     stopPlayback();
+    _cleared = _recording;
+    _clearedWasSaved = _saved;
     _recording = null;
     _saved = false;
     _lastSavedPath = null;
@@ -233,9 +318,22 @@ class XylophoneController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Brings back the tune removed by the last [clearRecording], if no new
+  /// tune has been recorded since.
+  void undoClear() {
+    final rec = _cleared;
+    _cleared = null;
+    if (rec == null || hasRecording || isRecording) return;
+    _recording = rec;
+    _saved = _clearedWasSaved;
+    if (_saved) _store.recording = rec;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     stopPlayback();
+    _songDone.close();
     struck.dispose();
     super.dispose();
   }
